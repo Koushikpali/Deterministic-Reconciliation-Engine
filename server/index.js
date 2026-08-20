@@ -1,20 +1,41 @@
 require('dotenv').config();
 const express = require('express');
+const http = require('http');
 const cors = require('cors');
 const multer = require('multer');
 const fs = require('fs');
 const path = require('path');
 const { v4: uuidv4 } = require('uuid');
+const { Server } = require('socket.io');
 
 const { parseCsv } = require('./utils/csvParser');
 const { runReconciliation } = require('./pipeline');
 const { logRun, getRun, listRuns } = require('./audit/logger');
 
 const app = express();
+const server = http.createServer(app);
+const io = new Server(server, { cors: { origin: '*' } });
 const PORT = process.env.PORT || 4000;
 
 app.use(cors());
 app.use(express.json());
+app.use(express.static(path.join(__dirname, '..', 'public')));
+
+io.on('connection', (socket) => {
+  socket.on('disconnect', () => {});
+});
+
+/**
+ * Builds a per-run progress emitter. If a client_id (the uploader's
+ * socket.id) was supplied, stage events are pushed straight to that socket
+ * so the frontend can render a live waterfall while /reconcile is running.
+ */
+function makeEmitter(clientId) {
+  if (!clientId) return () => {};
+  const socket = io.sockets.sockets.get(clientId);
+  if (!socket) return () => {};
+  return (event, data) => socket.emit('progress', { event, ...data });
+}
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
 
@@ -58,7 +79,8 @@ app.post(
         });
       }
 
-      const { summary, results } = await runReconciliation(bankRows, ledgerRows);
+      const emit = makeEmitter(req.body.client_id);
+      const { summary, results } = await runReconciliation(bankRows, ledgerRows, emit);
 
       const runId = uuidv4();
       logRun(runId, summary, results);
@@ -91,7 +113,8 @@ app.post('/reconcile/sample', async (req, res) => {
     const bankRows = parseCsv(fs.readFileSync(bankPath, 'utf-8'), 'bank');
     const ledgerRows = parseCsv(fs.readFileSync(ledgerPath, 'utf-8'), 'ledger');
 
-    const { summary, results } = await runReconciliation(bankRows, ledgerRows);
+    const emit = makeEmitter(req.body.client_id || req.query.client_id);
+    const { summary, results } = await runReconciliation(bankRows, ledgerRows, emit);
 
     const runId = uuidv4();
     logRun(runId, summary, results);
@@ -119,7 +142,7 @@ app.use((req, res) => {
   res.status(404).json({ error: `No route for ${req.method} ${req.path}` });
 });
 
-app.listen(PORT, () => {
+server.listen(PORT, () => {
   console.log(`Reconciliation engine listening on http://localhost:${PORT}`);
   console.log(`Groq LLM stage: ${process.env.GROQ_API_KEY ? 'ENABLED' : 'DISABLED (no GROQ_API_KEY — stage 4 will log unresolved rows without calling the LLM)'}`);
 });

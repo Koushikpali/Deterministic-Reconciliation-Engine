@@ -1,0 +1,291 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Zenalyst — Reconciliation Engine</title>
+<script src="/socket.io/socket.io.js"></script>
+<style>
+  :root {
+    --bg: #0b0e11;
+    --panel: #11161c;
+    --border: #232b33;
+    --text: #e6edf3;
+    --muted: #8b98a5;
+    --accent: #3ddc97;
+    --accent-dim: #1f7a55;
+    --amber: #e6b450;
+    --red: #e05252;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+  }
+  header {
+    padding: 28px 32px 16px;
+    border-bottom: 1px solid var(--border);
+  }
+  header h1 { margin: 0; font-size: 22px; letter-spacing: 0.3px; }
+  header p { margin: 6px 0 0; color: var(--muted); font-size: 14px; }
+  .wrap { max-width: 980px; margin: 0 auto; padding: 28px 32px 60px; }
+  .panel {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 22px;
+    margin-bottom: 22px;
+  }
+  .row { display: flex; gap: 16px; flex-wrap: wrap; }
+  .dropzone {
+    flex: 1;
+    min-width: 220px;
+    border: 1.5px dashed var(--border);
+    border-radius: 8px;
+    padding: 20px;
+    text-align: center;
+    cursor: pointer;
+    transition: border-color .15s;
+    font-size: 13px;
+    color: var(--muted);
+  }
+  .dropzone.filled { border-color: var(--accent); color: var(--text); }
+  .dropzone:hover { border-color: var(--accent-dim); }
+  .dropzone input { display: none; }
+  .controls { margin-top: 18px; display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+  button {
+    background: var(--accent);
+    color: #06120c;
+    border: none;
+    font-weight: 600;
+    padding: 10px 18px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 14px;
+  }
+  button.secondary {
+    background: transparent;
+    color: var(--text);
+    border: 1px solid var(--border);
+  }
+  button:disabled { opacity: 0.5; cursor: not-allowed; }
+  .status-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; margin-right: 8px; }
+  .status-dot.live { background: var(--accent); box-shadow: 0 0 6px var(--accent); }
+  .status-dot.off { background: var(--muted); }
+  #connState { font-size: 12px; color: var(--muted); }
+
+  .stages { display: flex; flex-direction: column; gap: 10px; margin-top: 4px; }
+  .stage {
+    display: flex; align-items: center; gap: 14px;
+    padding: 12px 14px; border-radius: 8px; border: 1px solid var(--border);
+    background: #0d1116; opacity: 0.45; transition: opacity .2s, border-color .2s;
+  }
+  .stage.active { opacity: 1; border-color: var(--accent-dim); }
+  .stage.done { opacity: 1; }
+  .stage .num {
+    width: 26px; height: 26px; border-radius: 50%; display: flex; align-items: center; justify-content: center;
+    background: var(--border); font-size: 12px; font-weight: 700; flex-shrink: 0;
+  }
+  .stage.done .num { background: var(--accent); color: #06120c; }
+  .stage.active .num { background: var(--amber); color: #06120c; }
+  .stage .label { flex: 1; font-size: 14px; }
+  .stage .meta { font-size: 12px; color: var(--muted); }
+
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { text-align: left; padding: 9px 10px; border-bottom: 1px solid var(--border); }
+  th { color: var(--muted); font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: .04em; }
+  .badge { padding: 2px 8px; border-radius: 999px; font-size: 11px; font-weight: 600; }
+  .badge.matched { background: rgba(61,220,151,.15); color: var(--accent); }
+  .badge.flagged_for_review { background: rgba(230,180,80,.15); color: var(--amber); }
+  .badge.unresolved { background: rgba(224,82,82,.15); color: var(--red); }
+  .summary-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px,1fr)); gap: 12px; margin-bottom: 18px; }
+  .summary-grid .card { background: #0d1116; border: 1px solid var(--border); border-radius: 8px; padding: 12px; text-align: center; }
+  .summary-grid .card .n { font-size: 20px; font-weight: 700; }
+  .summary-grid .card .l { font-size: 11px; color: var(--muted); margin-top: 2px; }
+  .hidden { display: none !important; }
+  #err { color: var(--red); font-size: 13px; margin-top: 10px; }
+  .tableWrap { max-height: 420px; overflow: auto; border: 1px solid var(--border); border-radius: 8px; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Zenalyst — Deterministic Reconciliation Engine</h1>
+  <p><span id="connDot" class="status-dot off"></span><span id="connState">connecting…</span></p>
+</header>
+
+<div class="wrap">
+
+  <div class="panel">
+    <div class="row">
+      <label class="dropzone" id="dzBank">
+        <div id="dzBankLabel">Drop bank_statement.csv<br/>or click to choose</div>
+        <input type="file" id="bankFile" accept=".csv" />
+      </label>
+      <label class="dropzone" id="dzLedger">
+        <div id="dzLedgerLabel">Drop ledger.csv<br/>or click to choose</div>
+        <input type="file" id="ledgerFile" accept=".csv" />
+      </label>
+    </div>
+    <div class="controls">
+      <button id="runBtn">Run reconciliation</button>
+      <button id="sampleBtn" class="secondary">Run bundled sample instead</button>
+    </div>
+    <div id="err"></div>
+  </div>
+
+  <div class="panel hidden" id="stagePanel">
+    <div class="stages" id="stages">
+      <div class="stage" data-stage="1"><div class="num">1</div><div class="label">Exact match</div><div class="meta">—</div></div>
+      <div class="stage" data-stage="2"><div class="num">2</div><div class="label">Fuzzy match</div><div class="meta">—</div></div>
+      <div class="stage" data-stage="3"><div class="num">3</div><div class="label">Split / combo match</div><div class="meta">—</div></div>
+      <div class="stage" data-stage="4"><div class="num">4</div><div class="label">LLM exception handler (Groq)</div><div class="meta">—</div></div>
+    </div>
+  </div>
+
+  <div class="panel hidden" id="resultsPanel">
+    <div class="summary-grid" id="summaryGrid"></div>
+    <div class="tableWrap">
+      <table>
+        <thead>
+          <tr><th>Bank ref</th><th>Ledger ref</th><th>Amount</th><th>Status</th><th>Method</th><th>Confidence</th><th>Reasoning</th></tr>
+        </thead>
+        <tbody id="resultsBody"></tbody>
+      </table>
+    </div>
+  </div>
+
+</div>
+
+<script>
+const socket = io();
+const connDot = document.getElementById('connDot');
+const connState = document.getElementById('connState');
+socket.on('connect', () => { connDot.className = 'status-dot live'; connState.textContent = 'live — socket connected'; });
+socket.on('disconnect', () => { connDot.className = 'status-dot off'; connState.textContent = 'disconnected'; });
+
+function wireDropzone(zoneId, inputId, labelId, filenamePrefix) {
+  const zone = document.getElementById(zoneId);
+  const input = document.getElementById(inputId);
+  const label = document.getElementById(labelId);
+  zone.addEventListener('click', () => input.click());
+  input.addEventListener('change', () => {
+    if (input.files[0]) {
+      zone.classList.add('filled');
+      label.textContent = input.files[0].name;
+    }
+  });
+}
+wireDropzone('dzBank', 'bankFile', 'dzBankLabel');
+wireDropzone('dzLedger', 'ledgerFile', 'dzLedgerLabel');
+
+const runBtn = document.getElementById('runBtn');
+const sampleBtn = document.getElementById('sampleBtn');
+const errEl = document.getElementById('err');
+const stagePanel = document.getElementById('stagePanel');
+const resultsPanel = document.getElementById('resultsPanel');
+
+function resetStages() {
+  document.querySelectorAll('.stage').forEach(s => {
+    s.classList.remove('active', 'done');
+    s.querySelector('.meta').textContent = '—';
+  });
+}
+
+socket.on('progress', (msg) => {
+  if (msg.event === 'stage_started') {
+    const el = document.querySelector(`.stage[data-stage="${msg.stage}"]`);
+    if (el) { el.classList.add('active'); el.querySelector('.meta').textContent = 'running…'; }
+  }
+  if (msg.event === 'stage_complete') {
+    const el = document.querySelector(`.stage[data-stage="${msg.stage}"]`);
+    if (el) {
+      el.classList.remove('active');
+      el.classList.add('done');
+      const meta = msg.stage === 4
+        ? `${msg.flagged} flagged, ${msg.unresolved} unresolved`
+        : `${msg.matched} matched, ${msg.remaining} carried forward`;
+      el.querySelector('.meta').textContent = meta;
+    }
+    // mark next stage active immediately for smoother feel
+    const next = document.querySelector(`.stage[data-stage="${msg.stage + 1}"]`);
+    if (next && !next.classList.contains('done')) next.classList.add('active');
+  }
+});
+
+async function runWithFiles(sample) {
+  errEl.textContent = '';
+  resultsPanel.classList.add('hidden');
+  stagePanel.classList.remove('hidden');
+  resetStages();
+  runBtn.disabled = true;
+  sampleBtn.disabled = true;
+
+  try {
+    let res;
+    if (sample) {
+      res = await fetch(`/reconcile/sample?client_id=${encodeURIComponent(socket.id || '')}`, { method: 'POST' });
+    } else {
+      const bankFile = document.getElementById('bankFile').files[0];
+      const ledgerFile = document.getElementById('ledgerFile').files[0];
+      if (!bankFile || !ledgerFile) {
+        errEl.textContent = 'Choose both a bank_statement.csv and a ledger.csv, or run the bundled sample.';
+        stagePanel.classList.add('hidden');
+        return;
+      }
+      const fd = new FormData();
+      fd.append('bank_statement', bankFile);
+      fd.append('ledger', ledgerFile);
+      fd.append('client_id', socket.id || '');
+      res = await fetch('/reconcile', { method: 'POST', body: fd });
+    }
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Reconciliation failed.');
+    renderResults(data);
+  } catch (e) {
+    errEl.textContent = e.message;
+  } finally {
+    runBtn.disabled = false;
+    sampleBtn.disabled = false;
+  }
+}
+
+runBtn.addEventListener('click', () => runWithFiles(false));
+sampleBtn.addEventListener('click', () => runWithFiles(true));
+
+function renderResults(data) {
+  const { summary, results } = data;
+  const grid = document.getElementById('summaryGrid');
+  const cards = [
+    ['Total rows', summary.total_rows],
+    ['Exact', summary.stage1_exact],
+    ['Fuzzy', summary.stage2_fuzzy],
+    ['Combo', summary.stage3_combo],
+    ['LLM flagged', summary.stage4_llm],
+    ['Unresolved', summary.unresolved],
+    ['% deterministic', summary.pct_resolved_deterministically + '%'],
+  ];
+  grid.innerHTML = cards.map(([l, n]) => `<div class="card"><div class="n">${n}</div><div class="l">${l}</div></div>`).join('');
+
+  const body = document.getElementById('resultsBody');
+  body.innerHTML = results.map(r => `
+    <tr>
+      <td>${r.bank_ref ?? ''}</td>
+      <td>${r.ledger_ref ?? ''}</td>
+      <td>${typeof r.amount === 'number' ? r.amount.toFixed(2) : ''}</td>
+      <td><span class="badge ${r.status}">${r.status.replace(/_/g,' ')}</span></td>
+      <td>${r.method ?? ''}</td>
+      <td>${typeof r.confidence === 'number' ? r.confidence.toFixed(2) : ''}</td>
+      <td>${r.reasoning ?? ''}</td>
+    </tr>
+  `).join('');
+
+  resultsPanel.classList.remove('hidden');
+}
+</script>
+
+</body>
+</html>

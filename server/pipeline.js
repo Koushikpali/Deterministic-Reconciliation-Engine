@@ -11,13 +11,44 @@ const { llmMatchStage } = require('./matchers/llmMatch');
  * described in the project spec: { bank_ref, ledger_ref, amount, status,
  * method, confidence, reasoning }.
  */
-async function runReconciliation(bankRows, ledgerRows) {
+async function runReconciliation(bankRows, ledgerRows, onProgress) {
+  const emit = typeof onProgress === 'function' ? onProgress : () => {};
   const totalRows = bankRows.length + ledgerRows.length;
 
+  emit('started', { total_bank_rows: bankRows.length, total_ledger_rows: ledgerRows.length });
+
   const stage1 = exactMatchStage(bankRows, ledgerRows);
+  emit('stage_complete', {
+    stage: 1,
+    label: 'Exact match',
+    matched: stage1.matches.length,
+    remaining: stage1.unmatchedBank.length + stage1.unmatchedLedger.length,
+  });
+
   const stage2 = fuzzyMatchStage(stage1.unmatchedBank, stage1.unmatchedLedger);
+  emit('stage_complete', {
+    stage: 2,
+    label: 'Fuzzy match',
+    matched: stage2.matches.length,
+    remaining: stage2.unmatchedBank.length + stage2.unmatchedLedger.length,
+  });
+
   const stage3 = comboMatchStage(stage2.unmatchedBank, stage2.unmatchedLedger);
+  emit('stage_complete', {
+    stage: 3,
+    label: 'Split / combo match',
+    matched: stage3.matches.length,
+    remaining: stage3.unmatchedBank.length + stage3.unmatchedLedger.length,
+  });
+
+  emit('stage_started', { stage: 4, label: 'LLM exception handler (Groq)' });
   const stage4Results = await llmMatchStage(stage3.unmatchedBank, stage3.unmatchedLedger);
+  emit('stage_complete', {
+    stage: 4,
+    label: 'LLM exception handler',
+    flagged: stage4Results.filter((r) => r.status === 'flagged_for_review').length,
+    unresolved: stage4Results.filter((r) => r.status === 'unresolved').length,
+  });
 
   const allResults = [
     ...stage1.matches,
@@ -48,6 +79,8 @@ async function runReconciliation(bankRows, ledgerRows) {
   summary.pct_needs_llm_or_review = totalRows > 0
     ? round1(100 - summary.pct_resolved_deterministically)
     : 0;
+
+  emit('done', { summary });
 
   return { summary, results: allResults };
 }
