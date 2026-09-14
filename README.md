@@ -1,4 +1,4 @@
-# Zenalyst — Deterministic Reconciliation Engine
+#  Deterministic Reconciliation Engine
 
 A deterministic-first bank-to-ledger reconciliation pipeline that mirrors real treasury workflows. It uses fast, explainable logic for the vast majority of matches and only asks an LLM to assist on genuinely ambiguous leftovers—ensuring auditability, explainability, and conservative AI usage.
 
