@@ -6,7 +6,7 @@ A deterministic-first bank-to-ledger reconciliation pipeline that mirrors real t
 Deterministic matching (exact, fuzzy, split/combo) first; LLM only for exceptions. Every decision is logged with a method, computed confidence, and a plain-English reason.
 
 ## Why this matters
-Most "AI reconciliation" demos throw two CSVs at an LLM and hope for the best. That approach is fast to build but impossible to audit and unacceptable to finance teams that need traceability. Zenalyst performs deterministic matching first (the parts humans expect to be deterministic), and reserves the LLM for a small set of ambiguous rows. Every result—deterministic or AI-assisted—gets an append-only audit entry explaining why it was chosen and how confident the system is.
+Most "AI reconciliation" demos throw two CSVs at an LLM and hope for the best. That approach is fast to build but impossible to audit and unacceptable to finance teams that need traceability.  performs deterministic matching first (the parts humans expect to be deterministic), and reserves the LLM for a small set of ambiguous rows. Every result—deterministic or AI-assisted—gets an append-only audit entry explaining why it was chosen and how confident the system is.
 
 ## Key features
 - Deterministic-first, multi-stage waterfall matching:
@@ -79,8 +79,8 @@ How it fits together
 Requirements: Node.js (16+ recommended)
 
 ```bash
-git clone https://github.com/<your-org>/zenalyst.git
-cd zenalyst
+git clone https://github.com/<your-org>/.git
+cd 
 npm install
 cp .env.example .env        # set GROQ_API_KEY if you want Stage 4 enabled
 npm run generate-data       # optional: regenerates sample dataset
